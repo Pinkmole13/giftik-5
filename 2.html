@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pixel Gift Chase</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; touch-action: none; }
+    canvas { display: block; image-rendering: pixelated; }
+    @font-face {
+      font-family: 'PressStart';
+      src: url('https://fonts.gstatic.com/s/pressstart2p/v15/e3t4euO8T-267oIAQAu6jDQyK0nS.woff2') format('woff2');
+    }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+// ================= iOS FIXES =================
+// iOS requires user interaction for audio + prevents default touch behavior
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const isMobile = 'ontouchstart' in window;
+
+// --------- AUDIO (8-bit footsteps) ---------
+let audioCtx = null;
+let stepOsc = null;
+let audioUnlocked = false;
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioUnlocked = true;
+}
+
+function playStep() {
+  if (!audioUnlocked) return;
+  if (stepOsc) stepOsc.stop();
+  stepOsc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  stepOsc.type = 'square';
+  stepOsc.frequency.value = 220 + Math.random() * 40;
+  gain.gain.value = 0.05;
+  stepOsc.connect(gain);
+  gain.connect(audioCtx.destination);
+  stepOsc.start();
+  stepOsc.stop(audioCtx.currentTime + 0.05);
+}
+
+// --- INPUT ---
+const keys = {};
+let touchDir = { x: 0, y: 0 };
+let touchStart = null;
+
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+canvas.addEventListener('touchstart', e => {
+  unlockAudio(); // IMPORTANT for iOS
+  touchStart = e.touches[0];
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  if (!touchStart) return;
+  const t = e.touches[0];
+  touchDir.x = t.clientX - touchStart.clientX;
+  touchDir.y = t.clientY - touchStart.clientY;
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  touchDir.x = 0;
+  touchDir.y = 0;
+  touchStart = null;
+  e.preventDefault();
+}, { passive: false });
+
+let gameOver = false;
+let endTime = 0;
+let stepCooldown = 0;
+
+function resetGame() {
+  gameOver = false;
+  player.x = canvas.width / 2;
+  player.y = canvas.height / 2;
+  gift.x = Math.random() * (canvas.width - gift.size);
+  gift.y = Math.random() * (canvas.height - gift.size);
+  gift.speedMultiplier = 2;
+  gift.fleeing = false;
+  particles = snowParticles();
+}
+
+// --- PLAYER ---
+const player = { x: canvas.width/2, y: canvas.height/2, size: 28, speed: 2, step: 0 };
+
+// --- GIFT ---
+const gift = { x: 100, y: 100, size: 54, speedMultiplier: 2, minMultiplier: 0.1, lastDecay: performance.now(), fleeing: false, step: 0, vx: 1, vy: 1 };
+
+function snowParticles() {
+  return Array.from({ length: 100 }, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, speed: 0.3+Math.random()*0.3, size: 5+Math.random()*4, color: 'white' }));
+}
+
+let particles = snowParticles();
+const congratsImg = new Image();
+congratsImg.src = 'https://i.imgur.com/LsbkzB0.jpeg';
+
+function clamp(o){ o.x=Math.max(0,Math.min(canvas.width-o.size,o.x)); o.y=Math.max(0,Math.min(canvas.height-o.size,o.y)); }
+
+function updateParticles(){ for(const p of particles){ p.y+=p.speed; if(p.y>canvas.height){ p.y=-20; p.x=Math.random()*canvas.width; } } }
+function drawParticles(){ for(const p of particles){ ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y,p.size,p.size); } }
+
+function updatePlayer(){
+  let dx=0, dy=0;
+  if(keys['w']||keys['arrowup']) dy--;
+  if(keys['s']||keys['arrowdown']) dy++;
+  if(keys['a']||keys['arrowleft']) dx--;
+  if(keys['d']||keys['arrowright']) dx++;
+  if(touchDir.x||touchDir.y){ dx=Math.sign(touchDir.x); dy=Math.sign(touchDir.y); }
+  if(dx||dy){ player.x+=dx*player.speed; player.y+=dy*player.speed; player.step+=0.25;
+    if(stepCooldown<=0){ playStep(); stepCooldown=10; }
+  }
+  stepCooldown--;
+  clamp(player);
+}
+
+function drawPlayer(){ const s=Math.sin(player.step)*4;
+  ctx.fillStyle='#ffcc00'; ctx.fillRect(player.x,player.y,player.size,player.size);
+  ctx.fillStyle='#e6b800'; ctx.fillRect(player.x+player.size/3,player.y-6,player.size/3,6);
+  ctx.fillStyle='#0055ff'; ctx.fillRect(player.x,player.y+player.size,player.size,player.size);
+  ctx.fillStyle='#ffcc00'; ctx.fillRect(player.x-5,player.y+player.size+6+s,5,10); ctx.fillRect(player.x+player.size,player.y+player.size+6-s,5,10);
+  ctx.fillStyle='#333'; ctx.fillRect(player.x,player.y+player.size*2+s,player.size/2,player.size); ctx.fillRect(player.x+player.size/2,player.y+player.size*2-s,player.size/2,player.size);
+}
+
+function distance(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+
+function updateGift(t){ const d=distance(player,gift); if(d<160) gift.fleeing=true;
+  if(gift.fleeing){ const sp=player.speed*gift.speedMultiplier; gift.x+=gift.vx*sp; gift.y+=gift.vy*sp; gift.step+=0.3;
+    if(gift.x<=0||gift.x>=canvas.width-gift.size) gift.vx*=-1;
+    if(gift.y<=0||gift.y>=canvas.height-gift.size) gift.vy*=-1;
+    if(t-gift.lastDecay>2000){ gift.speedMultiplier=Math.max(gift.minMultiplier,gift.speedMultiplier*0.9); gift.lastDecay=t; }
+  }
+  clamp(gift);
+  if(d<player.size){ gameOver=true; endTime=t; if(navigator.vibrate) navigator.vibrate([200,100,200]); particles=Array.from({length:120},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,speed:2+Math.random()*3,size:18+Math.random()*18,color:`hsl(${Math.random()*360},100%,60%)`})); }
+}
+
+function drawGift(){ const s=Math.sin(gift.step)*4; ctx.fillStyle='#c00'; ctx.fillRect(gift.x,gift.y,gift.size,gift.size); ctx.fillStyle='#fff'; ctx.fillRect(gift.x+gift.size/2-4,gift.y,8,gift.size); ctx.fillRect(gift.x,gift.y+gift.size/2-4,gift.size,8); ctx.fillStyle='#c00'; ctx.fillRect(gift.x-6,gift.y+10+s,6,14); ctx.fillRect(gift.x+gift.size,gift.y+10-s,6,14); ctx.fillStyle='#888'; ctx.fillRect(gift.x+8,gift.y+gift.size+s,8,14); ctx.fillRect(gift.x+gift.size-16,gift.y+gift.size-s,8,14); }
+
+canvas.addEventListener('click',e=>{ if(!gameOver)return; const bx=canvas.width/2-120,by=canvas.height-100; if(e.clientX>bx&&e.clientX<bx+240&&e.clientY>by&&e.clientY<by+50) resetGame(); });
+
+function drawEndScreen(t){ const tt=(t-endTime)/1000; ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const w=1960*0.35,h=1360*0.35; ctx.save(); ctx.translate(canvas.width/2,canvas.height/2-60); ctx.rotate(Math.sin(tt)*0.05); ctx.drawImage(congratsImg,-w/2,-h/2,w,h); ctx.restore();
+  ctx.fillStyle='white'; ctx.font='24px PressStart'; ctx.textAlign='center'; ctx.fillText('ПОЗДРАВЛЯЕМ!',canvas.width/2,canvas.height/2+h/2+40);
+  const bx=canvas.width/2-120,by=canvas.height-100; ctx.fillStyle='#222'; ctx.fillRect(bx,by,240,50); ctx.strokeStyle='white'; ctx.strokeRect(bx,by,240,50); ctx.fillStyle='white'; ctx.font='14px PressStart'; ctx.fillText('ПОЙМАТЬ ЕЩЁ РАЗ',canvas.width/2,by+32);
+}
+
+function drawHint(){ ctx.fillStyle='white'; ctx.font='12px PressStart'; ctx.textAlign='center'; ctx.fillText(isMobile?'СВАЙПНИ, ЧТОБЫ ДВИГАТЬСЯ':'ИСПОЛЬЗУЙ СТРЕЛОЧКИ',canvas.width/2,canvas.height-20); }
+
+function loop(t){ ctx.clearRect(0,0,canvas.width,canvas.height); updateParticles(); drawParticles(); if(!gameOver){ updatePlayer(); drawPlayer(); updateGift(t); drawGift(); drawHint(); } else drawEndScreen(t); requestAnimationFrame(loop); }
+loop(performance.now());
+</script>
+</body>
+</html>
